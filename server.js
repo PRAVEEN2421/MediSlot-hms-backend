@@ -16,6 +16,7 @@ connectCloudinary();
 app.use(cors({
   origin: [
     "http://localhost:5173",
+    "http://localhost:5174",
     "https://prescripto-hms-backend.onrender.com"
   ],
   credentials: true,

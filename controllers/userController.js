@@ -147,6 +147,19 @@ const bookAppointment = async (req, res) => {
             return res.json({ success: false, message: 'Doctor Not Available' })
         }
 
+        // Prevent Duplicate Bookings for the same user, doctor, and timeslot
+        const existingAppointment = await appointmentModel.findOne({
+            userId,
+            docId,
+            slotDate,
+            slotTime,
+            cancelled: false
+        })
+
+        if (existingAppointment) {
+            return res.json({ success: false, message: 'You have already booked this slot' })
+        }
+
         let slots_booked = docData.slots_booked
 
         // checking for slot availablity 
@@ -166,6 +179,15 @@ const bookAppointment = async (req, res) => {
 
         delete docData.slots_booked
 
+        let isPaidByWallet = false;
+        let currentWalletBalance = userData.walletBalance || 0;
+
+        if (currentWalletBalance >= docData.fees) {
+            currentWalletBalance -= docData.fees;
+            await userModel.findByIdAndUpdate(userId, { walletBalance: currentWalletBalance });
+            isPaidByWallet = true;
+        }
+
         const appointmentData = {
             userId,
             docId,
@@ -174,6 +196,7 @@ const bookAppointment = async (req, res) => {
             amount: docData.fees,
             slotTime,
             slotDate,
+            payment: isPaidByWallet,
             date: Date.now()
         }
 
@@ -205,6 +228,13 @@ const cancelAppointment = async (req, res) => {
         }
 
         await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
+
+        // If the appointment was paid, process refund to user wallet
+        if (appointmentData.payment) {
+            const userWalletData = await userModel.findById(userId);
+            const currentBalance = userWalletData.walletBalance || 0;
+            await userModel.findByIdAndUpdate(userId, { walletBalance: currentBalance + appointmentData.amount });
+        }
 
         // releasing doctor slot 
         const { docId, slotDate, slotTime } = appointmentData

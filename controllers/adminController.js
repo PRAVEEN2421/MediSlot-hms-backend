@@ -46,7 +46,16 @@ const appointmentCancel = async (req, res) => {
     try {
 
         const { appointmentId } = req.body
+        const appointmentData = await appointmentModel.findById(appointmentId)
+
         await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
+
+        // If the appointment was paid, process refund to user wallet
+        if (appointmentData && appointmentData.payment) {
+            const userWalletData = await userModel.findById(appointmentData.userId);
+            const currentBalance = userWalletData.walletBalance || 0;
+            await userModel.findByIdAndUpdate(appointmentData.userId, { walletBalance: currentBalance + appointmentData.amount });
+        }
 
         res.json({ success: true, message: 'Appointment Cancelled' })
 
@@ -146,11 +155,27 @@ const adminDashboard = async (req, res) => {
         const users = await userModel.find({})
         const appointments = await appointmentModel.find({})
 
+        let totalRevenue = 0
+        let completedPayments = 0
+
+        appointments.map((item) => {
+            if (item.isCompleted || item.payment) {
+                totalRevenue += item.amount
+                completedPayments += 1
+            }
+        })
+
+        // Standard 10% platform fee margin for profit calculation
+        let profit = totalRevenue * 0.10;
+
         const dashData = {
             doctors: doctors.length,
             appointments: appointments.length,
             patients: users.length,
-            latestAppointments: appointments.reverse()
+            latestAppointments: appointments.reverse(),
+            totalRevenue,
+            profit,
+            completedPayments
         }
 
         res.json({ success: true, dashData })

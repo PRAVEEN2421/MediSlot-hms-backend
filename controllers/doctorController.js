@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import doctorModel from "../models/doctorModel.js";
 import appointmentModel from "../models/appointmentModel.js";
 import otpModel from "../models/otpModel.js";
+import userModel from "../models/userModel.js";
 
 // API for doctor Login 
 const loginDoctor = async (req, res) => {
@@ -56,6 +57,14 @@ const appointmentCancel = async (req, res) => {
         const appointmentData = await appointmentModel.findById(appointmentId)
         if (appointmentData && appointmentData.docId === docId) {
             await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
+
+            // If the appointment was paid, process refund to user wallet
+            if (appointmentData.payment) {
+                const userWalletData = await userModel.findById(appointmentData.userId);
+                const currentBalance = userWalletData.walletBalance || 0;
+                await userModel.findByIdAndUpdate(appointmentData.userId, { walletBalance: currentBalance + appointmentData.amount });
+            }
+
             return res.json({ success: true, message: 'Appointment Cancelled' })
         }
 

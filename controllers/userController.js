@@ -179,14 +179,7 @@ const bookAppointment = async (req, res) => {
 
         delete docData.slots_booked
 
-        let isPaidByWallet = false;
-        let currentWalletBalance = userData.walletBalance || 0;
-
-        if (currentWalletBalance >= docData.fees) {
-            currentWalletBalance -= docData.fees;
-            await userModel.findByIdAndUpdate(userId, { walletBalance: currentWalletBalance });
-            isPaidByWallet = true;
-        }
+        let isPaid = false;
 
         const appointmentData = {
             userId,
@@ -196,7 +189,7 @@ const bookAppointment = async (req, res) => {
             amount: docData.fees,
             slotTime,
             slotDate,
-            payment: isPaidByWallet,
+            payment: isPaid,
             date: Date.now()
         }
 
@@ -225,6 +218,10 @@ const cancelAppointment = async (req, res) => {
         // verify appointment user 
         if (appointmentData.userId !== userId) {
             return res.json({ success: false, message: 'Unauthorized action' })
+        }
+
+        if (appointmentData.cancelled) {
+            return res.json({ success: false, message: 'Appointment already cancelled' })
         }
 
         await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
@@ -378,6 +375,40 @@ const verifyStripe = async (req, res) => {
 
 }
 
+// API to make payment explicitly using User Wallet
+const payAppointmentWallet = async (req, res) => {
+    try {
+        const { appointmentId, userId } = req.body;
+
+        const appointmentData = await appointmentModel.findById(appointmentId);
+
+        if (!appointmentData || appointmentData.cancelled) {
+            return res.json({ success: false, message: 'Appointment Cancelled or not found' });
+        }
+
+        if (appointmentData.payment) {
+            return res.json({ success: false, message: 'Appointment already paid' });
+        }
+
+        const userData = await userModel.findById(userId);
+        const currentBalance = userData.walletBalance || 0;
+
+        if (currentBalance < appointmentData.amount) {
+            return res.json({ success: false, message: 'Insufficient wallet balance' });
+        }
+
+        // Deduct from wallet and mark appointment as paid
+        await userModel.findByIdAndUpdate(userId, { walletBalance: currentBalance - appointmentData.amount });
+        await appointmentModel.findByIdAndUpdate(appointmentId, { payment: true });
+
+        res.json({ success: true, message: 'Payment successful using Wallet' });
+
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+}
+
 // API to generate and send OTP for forgot password (Patient)
 const sendUserOTP = async (req, res) => {
     try {
@@ -440,6 +471,54 @@ const resetUserPassword = async (req, res) => {
     }
 }
 
+// API to initiate wallet recharge using Razorpay
+const rechargeWalletRazorpay = async (req, res) => {
+    try {
+        const { userId, amount } = req.body;
+
+        if (!amount || amount <= 0) {
+            return res.json({ success: false, message: 'Invalid recharge amount' });
+        }
+
+        const options = {
+            amount: amount * 100, // amount in the smallest currency unit
+            currency: process.env.CURRENCY,
+            receipt: `recharge_${userId}_${Date.now().toString().slice(-4)}`
+        };
+
+        const order = await razorpayInstance.orders.create(options);
+        res.json({ success: true, order });
+
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+}
+
+// API to verify wallet recharge Razorpay payment
+const verifyWalletRecharge = async (req, res) => {
+    try {
+        const { razorpay_order_id, userId, amount } = req.body;
+        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id);
+
+        if (orderInfo.status === 'paid') {
+            const userData = await userModel.findById(userId);
+            const currentBalance = userData.walletBalance || 0;
+
+            // The Razorpay order amount is in paise/cents, we convert it back to rupees/dollars for wallet
+            const addedAmount = orderInfo.amount / 100;
+
+            await userModel.findByIdAndUpdate(userId, { walletBalance: currentBalance + addedAmount });
+            res.json({ success: true, message: "Wallet Recharged Successfully" });
+        } else {
+            res.json({ success: false, message: 'Payment Failed' });
+        }
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+}
+
 export {
     loginUser,
     registerUser,
@@ -452,6 +531,9 @@ export {
     verifyRazorpay,
     paymentStripe,
     verifyStripe,
+    payAppointmentWallet,
     sendUserOTP,
-    resetUserPassword
+    resetUserPassword,
+    rechargeWalletRazorpay,
+    verifyWalletRecharge
 }

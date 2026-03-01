@@ -55,6 +55,11 @@ const appointmentCancel = async (req, res) => {
         const { docId, appointmentId } = req.body
 
         const appointmentData = await appointmentModel.findById(appointmentId)
+
+        if (appointmentData.cancelled) {
+            return res.json({ success: false, message: 'Appointment already cancelled' })
+        }
+
         if (appointmentData && appointmentData.docId === docId) {
             await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
 

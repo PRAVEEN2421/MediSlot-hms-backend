@@ -48,6 +48,10 @@ const appointmentCancel = async (req, res) => {
         const { appointmentId } = req.body
         const appointmentData = await appointmentModel.findById(appointmentId)
 
+        if (appointmentData.cancelled) {
+            return res.json({ success: false, message: 'Appointment already cancelled' })
+        }
+
         await appointmentModel.findByIdAndUpdate(appointmentId, { cancelled: true })
 
         // If the appointment was paid, process refund to user wallet
